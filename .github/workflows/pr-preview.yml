@@ -1,0 +1,61 @@
+name: Deploy preview bundle
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+# Only one preview deploy per PR at a time. Cancel earlier ones.
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  deploy-preview:
+    runs-on: ubuntu-latest
+    environment: preview
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@main
+
+      - name: Resolve model versions from "Production" alias
+        id: versions
+        run: |
+          set -euo pipefail
+          for model in florence phi3_vision granite_vision nougat; do
+            full="${BUNDLE_VAR_catalog:-main}.${BUNDLE_VAR_schema:-doc_parsing}.${model}"
+            ver=$(databricks model-versions get-by-alias "$full" Production --output json 2>/dev/null | jq -r '.version' || echo "1")
+            echo "BUNDLE_VAR_${model}_version=${ver:-1}" >> "$GITHUB_ENV"
+          done
+
+      - name: Bundle deploy --target preview
+        run: databricks bundle deploy --target preview
+
+      - name: "Run log-ocr-models (idempotent: only logs new versions when needed)"
+        run: |
+          databricks bundle run log-ocr-models --target preview --no-wait || true
+
+      - name: Comment on PR with preview details
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = context.payload.pull_request.head.ref;
+            const body = `Preview bundle deployed.\n` +
+              `- Schema: \`doc_parsing_preview_${branch}\`\n` +
+              `- Endpoints: \`preview_${branch}_doc-parser-{florence,phi3-vision,granite-vision,nougat}\`\n` +
+              `- App: \`preview_${branch}_doc-parser-playground\``;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });

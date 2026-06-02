@@ -1,0 +1,21 @@
+resources:
+  schemas:
+    doc_parsing:
+      catalog_name: ${var.catalog}
+      name: ${var.schema}
+      comment: "OCR document parsing models, UDFs, and volumes (managed by ${bundle.name})."
+
+  volumes:
+    inbox:
+      catalog_name: ${var.catalog}
+      schema_name: ${resources.schemas.doc_parsing.name}
+      name: inbox
+      volume_type: MANAGED
+      comment: "Drop PDFs / images here to test the OCR endpoints."
+
+    sample_docs:
+      catalog_name: ${var.catalog}
+      schema_name: ${resources.schemas.doc_parsing.name}
+      name: sample_docs
+      volume_type: MANAGED
+      comment: "Sample documents bundled with the project for smoke tests / examples."

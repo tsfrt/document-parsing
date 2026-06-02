@@ -1,0 +1,228 @@
+resources:
+  jobs:
+    log-ocr-models:
+      name: "[${bundle.target}] log-ocr-models"
+      description: "Snapshot HF weights for the four OCR models and log them to Unity Catalog. All four log tasks run in parallel on serverless compute (CPU)."
+      max_concurrent_runs: 1
+      tags:
+        project: ai-parse-doc
+        target: ${bundle.target}
+      tasks:
+        # All four log tasks are independent (each downloads a different
+        # HF repo and writes a different UC registered model). They run
+        # in parallel -- no `depends_on` between them. End-to-end log time
+        # drops from sum(ti) to max(ti), bounded by the slowest snapshot.
+        - task_key: log_florence
+          notebook_task:
+            notebook_path: ../notebooks/01_log_models.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              models: florence
+          environment_key: log_env
+
+        - task_key: log_phi3_vision
+          notebook_task:
+            notebook_path: ../notebooks/01_log_models.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              models: phi3_vision
+          environment_key: log_env
+
+        - task_key: log_granite_vision
+          notebook_task:
+            notebook_path: ../notebooks/01_log_models.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              models: granite_vision
+          environment_key: log_env
+
+        - task_key: log_nougat
+          notebook_task:
+            notebook_path: ../notebooks/01_log_models.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              models: nougat
+          environment_key: log_env
+
+      environments:
+        - environment_key: log_env
+          spec:
+            client: "1"
+            dependencies:
+              - mlflow>=2.20.0
+              - huggingface_hub>=0.26.0
+              - pypdfium2>=4.30.0
+              - pillow>=10.4.0
+              - pandas>=2.2.0
+
+    deploy-ocr-udfs:
+      name: "[${bundle.target}] deploy-ocr-udfs"
+      description: "Create the parse_doc_* SQL UDFs that wrap ai_query against each OCR endpoint."
+      tags:
+        project: ai-parse-doc
+        target: ${bundle.target}
+      tasks:
+        - task_key: create_udfs
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../sql/udfs.sql
+
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+
+    debug-load-ocr-models:
+      name: "[${bundle.target}] debug-load-ocr-models"
+      description: "Probe each OCR HF repo on serverless CPU to figure out the right processor / tokenizer class."
+      tags:
+        project: ai-parse-doc
+        target: ${bundle.target}
+      tasks:
+        - task_key: debug
+          notebook_task:
+            notebook_path: ../notebooks/03_debug_load.py
+          environment_key: debug_env
+      environments:
+        - environment_key: debug_env
+          spec:
+            client: "1"
+            dependencies:
+              - transformers>=4.57.0
+              - huggingface_hub>=0.26.0
+              - pillow>=10.4.0
+              - einops>=0.8.0
+              - sentencepiece>=0.2.0
+              - tiktoken>=0.8.0
+              - timm>=1.0.0
+
+    dump-artifact:
+      name: "[${bundle.target}] dump-artifact"
+      description: "Download the @Production artifact for one registered model and print its file tree."
+      tags:
+        project: ai-parse-doc
+        target: ${bundle.target}
+      parameters:
+        - name: registered_name
+          default: "${var.catalog}.${var.schema}.florence"
+        - name: alias
+          default: "Production"
+      tasks:
+        - task_key: dump
+          notebook_task:
+            notebook_path: ../notebooks/05_dump_artifact.py
+            base_parameters:
+              registered_name: "{{job.parameters.registered_name}}"
+              alias: "{{job.parameters.alias}}"
+          environment_key: dump_env
+      environments:
+        - environment_key: dump_env
+          spec:
+            client: "1"
+            dependencies:
+              - mlflow>=2.20.0
+
+    smoke-test-running-ocr:
+      name: "[${bundle.target}] smoke-test-running-ocr"
+      description: "Smoke-test every doc-parser-* serving endpoint that is currently READY."
+      tags:
+        project: ai-parse-doc
+        target: ${bundle.target}
+      tasks:
+        - task_key: smoke
+          notebook_task:
+            notebook_path: ../notebooks/06_smoke_test_running.py
+          environment_key: smoke_env
+      environments:
+        - environment_key: smoke_env
+          spec:
+            client: "1"
+            dependencies:
+              - pillow>=10.4.0
+              - databricks-sdk>=0.40.0
+
+    invoke-test-endpoint:
+      name: "[${bundle.target}] invoke-test-endpoint"
+      description: "Sends a tiny synthetic PNG to one named endpoint to validate end-to-end inference."
+      tags:
+        project: ai-parse-doc
+        target: ${bundle.target}
+      parameters:
+        - name: endpoint
+          default: "doc-parser-florence"
+      tasks:
+        - task_key: invoke
+          notebook_task:
+            notebook_path: ../notebooks/04_invoke_test.py
+            base_parameters:
+              endpoint: "{{job.parameters.endpoint}}"
+          environment_key: invoke_env
+      environments:
+        - environment_key: invoke_env
+          spec:
+            client: "1"
+            dependencies:
+              - pillow>=10.4.0
+              - databricks-sdk>=0.40.0
+
+    smoke-test-ocr-endpoints:
+      name: "[${bundle.target}] smoke-test-ocr-endpoints"
+      description: "Send a tiny PDF to each endpoint and assert it returns non-empty markdown."
+      tags:
+        project: ai-parse-doc
+        target: ${bundle.target}
+      tasks:
+        - task_key: smoke
+          notebook_task:
+            notebook_path: ../notebooks/02_smoke_test.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+          environment_key: smoke_env
+
+      environments:
+        - environment_key: smoke_env
+          spec:
+            client: "1"
+            dependencies:
+              - pillow>=10.4.0
+              - databricks-sdk>=0.40.0
+
+    eval-ocr-endpoints:
+      name: "[${bundle.target}] eval-ocr-endpoints"
+      description: "Small mlflow.genai.evaluate() comparison across all four doc-parser-* endpoints. One named run per endpoint inside ${var.eval_experiment_path}."
+      tags:
+        project: ai-parse-doc
+        target: ${bundle.target}
+      parameters:
+        - name: experiment_path
+          default: ${var.eval_experiment_path}
+        - name: endpoints
+          default: "doc-parser-florence,doc-parser-phi3-vision,doc-parser-granite-vision,doc-parser-nougat"
+        - name: judge_model
+          default: ${var.eval_judge_model}
+      tasks:
+        - task_key: eval
+          notebook_task:
+            notebook_path: ../notebooks/04_eval.py
+            base_parameters:
+              experiment_path: "{{job.parameters.experiment_path}}"
+              endpoints: "{{job.parameters.endpoints}}"
+              judge_model: "{{job.parameters.judge_model}}"
+          environment_key: eval_env
+      environments:
+        - environment_key: eval_env
+          spec:
+            client: "1"
+            dependencies:
+              - "mlflow[databricks]>=3.1.0"
+              - databricks-sdk>=0.40.0
+              - pillow>=10.4.0
+              - pypdfium2>=4.30.0
+              - rapidfuzz>=3.10.0

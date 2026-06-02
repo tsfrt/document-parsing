@@ -1,0 +1,71 @@
+bundle:
+  name: ai-parse-doc
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog name where models, volumes, and SQL UDFs are deployed.
+    default: main
+  schema:
+    description: Schema inside the catalog used for OCR models, UDFs, and volumes.
+    default: doc_parsing
+  workload_size:
+    description: Model serving workload size (Small/Medium/Large).
+    default: Small
+  workload_type:
+    description: Model serving workload type. GPU_SMALL is T4-class.
+    default: GPU_SMALL
+  scale_to_zero_enabled:
+    description: Whether endpoints scale to zero when idle (saves cost, adds cold-start).
+    default: true
+  service_principal_name:
+    description: Service principal that runs the deployment job and owns the app (overridden per target).
+    default: ""
+  notification_email:
+    description: Email used for failure notifications on the deploy job.
+    default: ""
+  warehouse_id:
+    description: SQL warehouse used to apply UDF DDL (deploy-ocr-udfs job).
+    default: ""
+  florence_version:
+    description: Registered-model version of florence served by the endpoint. Resolve from the "Production" alias in CI.
+    default: "1"
+  phi3_vision_version:
+    description: Registered-model version of phi3_vision served by the endpoint.
+    default: "1"
+  granite_vision_version:
+    description: Registered-model version of granite_vision served by the endpoint.
+    default: "1"
+  nougat_version:
+    description: Registered-model version of nougat served by the endpoint.
+    default: "1"
+  eval_experiment_path:
+    description: Workspace path for the MLflow experiment used by eval-ocr-endpoints.
+    default: /Shared/ai-parse-doc/eval
+  eval_judge_model:
+    description: Foundation-model endpoint used as the LLM judge for the Correctness scorer.
+    default: databricks:/databricks-meta-llama-3-3-70b-instruct
+
+targets:
+  dev:
+    default: true
+    # `mode: development` is intentionally omitted -- the auto "dev_<user>_"
+    # prefix it adds to UC resources (schemas, registered_models) breaks the
+    # endpoint references which use ${var.catalog}.${var.schema}.<model>.
+
+  preview:
+    mode: development
+    presets:
+      name_prefix: "preview_${bundle.git.branch}_"
+    variables:
+      schema: doc_parsing_preview_${bundle.git.branch}
+
+  prod:
+    mode: production
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    permissions:
+      - level: CAN_MANAGE
+        group_name: data-platform-admins
