@@ -1,4 +1,4 @@
-# ai-parse-doc
+# document-parsing
 
 A Databricks Asset Bundle that deploys four GPU-backed OCR Model Serving endpoints — **Florence-2 large-ft**, **Phi-3.5-vision**, **Granite-Vision-3.2**, and **Nougat-base** — and exposes them through SQL UDFs callable via `ai_query` for natural use in Databricks SQL pipelines. All four models are USA-derived and sized to fit on a single 16 GB GPU (`GPU_SMALL` / T4-class). A minimal Streamlit playground app lets you upload a PDF/image and compare output across models.
 
