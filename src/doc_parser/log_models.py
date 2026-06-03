@@ -1,4 +1,4 @@
-"""Log all four OCR pyfunc models to MLflow + Unity Catalog.
+"""Log all three OCR pyfunc models to MLflow + Unity Catalog.
 
 Designed to be run as a Databricks Job task on serverless compute (CPU; the
 download is I/O bound, no GPU needed). Snapshots HF weights once and bakes
@@ -8,7 +8,7 @@ at startup.
 Usage (notebook / job task):
     python -m doc_parser.log_models \
         --catalog main --schema doc_parsing \
-        --models florence,phi3_vision,granite_vision,nougat
+        --models florence,phi3_vision,granite_vision
 """
 
 from __future__ import annotations
@@ -31,7 +31,6 @@ from mlflow.types.schema import ColSpec, DataType, Schema
 from .base import OcrPyfunc
 from .models.florence import FlorencePyfunc
 from .models.granite_vision import GraniteVisionPyfunc
-from .models.nougat import NougatPyfunc
 from .models.phi3_vision import Phi3VisionPyfunc
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -66,11 +65,6 @@ REGISTRY: dict[str, ModelSpec] = {
         key="granite_vision",
         cls=GraniteVisionPyfunc,
         factory="granite_vision_factory.py",
-    ),
-    "nougat": ModelSpec(
-        key="nougat",
-        cls=NougatPyfunc,
-        factory="nougat_factory.py",
     ),
 }
 
@@ -206,8 +200,13 @@ def _resolve_logged_version(registered_name: str, run_id: str) -> str:
 
 def _verify_factory_present(model_uri: str, original_factory_path: str) -> None:
     """Download the factory file from the artifact and assert it is non-empty
-    and matches the size of the source we wrote. This is a guard against the
+    and matches the size of the source we wrote. Guards against the
     MLflow-on-Serverless bug where shipped source can come back zero-byte.
+
+    Checks the *run* artifact only -- ``models:/<name>/<version>`` cannot be
+    resolved here because the version number isn't yet known. The
+    version-side mirror is verified separately by
+    :func:`_verify_version_factory`.
     """
     from mlflow.artifacts import download_artifacts
 
@@ -221,10 +220,109 @@ def _verify_factory_present(model_uri: str, original_factory_path: str) -> None:
     actual_size = os.path.getsize(local)
     if actual_size == 0 or actual_size < src_size // 2:
         raise RuntimeError(
-            f"MLflow shipped a truncated factory: {fname} "
+            f"MLflow shipped a truncated factory (run side): {fname} "
             f"src={src_size}B artifact={actual_size}B"
         )
-    log.info("  factory verified: %s (%dB)", fname, actual_size)
+    log.info("  factory verified (run side): %s (%dB)", fname, actual_size)
+
+
+def _verify_version_factory(
+    registered_name: str, version: str | int, original_factory_path: str
+) -> None:
+    """Verify the *registered-model-version* artifact copy of the factory.
+
+    UC sometimes truncates non-weight files when materializing a new
+    version's artifact storage from the run, leaving the .py file zero-byte
+    even though the run-side copy is fine. This function downloads via
+    ``models:/<name>/<version>`` (which is what Model Serving uses to load
+    the artifact) and raises if the factory shipped empty.
+    """
+    from mlflow.artifacts import download_artifacts
+
+    fname = os.path.basename(original_factory_path)
+    src_size = os.path.getsize(original_factory_path)
+    uri = f"models:/{registered_name}/{version}/{fname}"
+    try:
+        local = download_artifacts(artifact_uri=uri)
+    except Exception as exc:
+        log.warning("Could not download %s for version-side verify (%s)", uri, exc)
+        return
+    actual_size = os.path.getsize(local)
+    if actual_size == 0 or actual_size < src_size // 2:
+        raise RuntimeError(
+            f"MLflow shipped a truncated factory (version side): {uri} "
+            f"src={src_size}B artifact={actual_size}B"
+        )
+    log.info("  factory verified (version side): %s v%s (%dB)",
+             registered_name, version, actual_size)
+
+
+def _verify_version_weights(
+    registered_name: str, version: str | int, weights_dir: str
+) -> None:
+    """Walk the *registered-model-version*'s artifact tree and assert every
+    weight file's size matches the source directory within 1%. Catches the
+    UC version-side artifact-sync truncation that has bitten safetensors
+    shards (``SafetensorError: Error while deserializing header: header too
+    large`` at serve time).
+
+    ``MlflowClient.list_artifacts`` is recursive-on-demand and returns
+    file-size metadata without downloading content, so this is cheap even
+    on multi-GB models.
+    """
+    from mlflow.tracking import MlflowClient
+
+    expected: dict[str, int] = {}
+    for root, _, files in os.walk(weights_dir):
+        for f in files:
+            full = os.path.join(root, f)
+            rel = os.path.relpath(full, weights_dir).replace(os.sep, "/")
+            expected[rel] = os.path.getsize(full)
+
+    client = MlflowClient(registry_uri="databricks-uc")
+    base_uri = f"models:/{registered_name}/{version}"
+
+    def _walk(path: str) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for fi in client.list_artifacts(base_uri, path=path):
+            if fi.is_dir:
+                out.update(_walk(fi.path))
+            else:
+                out[fi.path] = int(fi.file_size or 0)
+        return out
+
+    try:
+        # Files are stored under artifacts/<weight_artifact_key>/...
+        actual = _walk("artifacts")
+    except Exception as exc:
+        log.warning("Could not list version-side artifacts (%s); skipping weight verify", exc)
+        return
+
+    truncated: list[str] = []
+    SIZE_TOLERANCE = 0.99
+    for rel, src_size in expected.items():
+        if src_size < 1024:
+            continue  # skip tiny config files
+        # version artifact path is "artifacts/<weight_key>/<rel>"
+        # find by suffix match
+        match = next(
+            (p for p in actual if p.endswith(f"/{rel}") or p.endswith(rel)),
+            None,
+        )
+        if match is None:
+            continue
+        actual_size = actual[match]
+        if actual_size < int(src_size * SIZE_TOLERANCE):
+            truncated.append(f"{match} src={src_size}B got={actual_size}B")
+
+    if truncated:
+        head = "\n  ".join(truncated[:5])
+        raise RuntimeError(
+            f"UC truncated {len(truncated)} weight file(s) in "
+            f"{registered_name} v{version}:\n  {head}"
+        )
+    log.info("  weights verified (version side): %s v%s (%d files)",
+             registered_name, version, len(expected))
 
 
 _RELATIVE_IMPORT_RE = re.compile(
@@ -283,6 +381,11 @@ def _build_self_contained_factory(spec: ModelSpec, dst_dir: str) -> str:
 
 
 def log_one(spec: ModelSpec, *, catalog: str, schema: str, cache_dir: str) -> str:
+    """Log + register one model, retrying transparently if the version-side
+    artifact comes back truncated (the documented MLflow-on-Serverless
+    zero-byte bug). The retry re-runs ``log_model`` from scratch which
+    creates a fresh run + UC version with a re-uploaded factory file.
+    """
     weights_dir = _snapshot_weights(spec, cache_dir)
     pip_reqs = list(CORE_PIP_REQUIREMENTS) + list(spec.extra_pip)
     registered_name = f"{catalog}.{schema}.{spec.key}"
@@ -292,34 +395,50 @@ def log_one(spec: ModelSpec, *, catalog: str, schema: str, cache_dir: str) -> st
     log.info("Logging %s as %s (self-contained factory at %s)",
              spec.cls.__name__, registered_name, factory_path)
 
-    with mlflow.start_run(run_name=f"log-{spec.key}") as run:
-        info = mlflow.pyfunc.log_model(
-            artifact_path="model",
-            python_model=factory_path,
-            artifacts={"weights": weights_dir},
-            # No `code_paths` -- the factory file inlines base.py + pdf_utils.py
-            # + the wrapper. MLflow's `code_paths` copy was producing zero-byte
-            # source files for sibling modules on Serverless, which broke
-            # serving-time imports.
-            infer_code_paths=False,
-            pip_requirements=pip_reqs,
-            signature=_signature(),
-            input_example=_example_input(),
-            registered_model_name=registered_name,
-            metadata={
-                "hf_repo": spec.cls.HF_REPO,
-                "model_name": spec.cls.MODEL_NAME,
-            },
-        )
-        # Defensive verification: ensure the factory file shipped non-empty.
-        _verify_factory_present(info.model_uri, factory_path)
-        log.info("  run_id=%s  model_uri=%s", run.info.run_id, info.model_uri)
-        version = (
-            getattr(info, "registered_model_version", None)
-            or _resolve_logged_version(registered_name, run.info.run_id)
-        )
-        _set_production_alias(registered_name, version)
-    return registered_name
+    last_err: Exception | None = None
+    for attempt in range(1, 4):
+        with mlflow.start_run(run_name=f"log-{spec.key}-attempt-{attempt}") as run:
+            info = mlflow.pyfunc.log_model(
+                artifact_path="model",
+                python_model=factory_path,
+                artifacts={"weights": weights_dir},
+                # No `code_paths` -- the factory file inlines base.py + pdf_utils.py
+                # + the wrapper. MLflow's `code_paths` copy was producing zero-byte
+                # source files for sibling modules on Serverless, which broke
+                # serving-time imports.
+                infer_code_paths=False,
+                pip_requirements=pip_reqs,
+                signature=_signature(),
+                input_example=_example_input(),
+                registered_model_name=registered_name,
+                metadata={
+                    "hf_repo": spec.cls.HF_REPO,
+                    "model_name": spec.cls.MODEL_NAME,
+                },
+            )
+            _verify_factory_present(info.model_uri, factory_path)
+            log.info("  run_id=%s  model_uri=%s", run.info.run_id, info.model_uri)
+            version = (
+                getattr(info, "registered_model_version", None)
+                or _resolve_logged_version(registered_name, run.info.run_id)
+            )
+            try:
+                _verify_version_factory(registered_name, version, factory_path)
+                _verify_version_weights(registered_name, version, weights_dir)
+            except RuntimeError as exc:
+                log.warning(
+                    "Version-side artifact truncated on attempt %d for %s v%s: %s",
+                    attempt, registered_name, version, exc,
+                )
+                last_err = exc
+                continue
+            _set_production_alias(registered_name, version)
+            return registered_name
+
+    raise RuntimeError(
+        f"Failed to log {registered_name} with a non-truncated version "
+        f"artifact after 3 attempts. Last error: {last_err}"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

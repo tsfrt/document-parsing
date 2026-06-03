@@ -1,7 +1,7 @@
 [project]
 name = "ai-parse-doc"
 version = "0.1.0"
-description = "USA-derived OCR document parsing endpoints on Databricks (Florence-2, Phi-3.5-vision, Granite-Vision, Nougat) callable via ai_query SQL UDFs."
+description = "USA-derived OCR document parsing endpoints on Databricks (Florence-2, Phi-3.5-vision, Granite-Vision) callable via ai_query SQL UDFs."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 authors = [{ name = "ai-parse-doc maintainers" }]

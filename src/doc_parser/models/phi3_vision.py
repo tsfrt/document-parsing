@@ -62,20 +62,49 @@ class Phi3VisionPyfunc(OcrPyfunc):
 
     @staticmethod
     def _patch_dynamic_cache_seen_tokens() -> None:
+        """Restore the legacy ``DynamicCache`` API surface that Phi-3.5-vision's
+        vendored modeling code relies on but transformers >= 4.50 removed:
+
+        * ``DynamicCache.seen_tokens``        -> ``get_seq_length()``
+        * ``DynamicCache.get_max_length()``   -> ``get_max_cache_shape()``
+        * ``DynamicCache.get_usable_length()``-> ``get_seq_length(layer_idx)``
+          (DynamicCache has no max length, so usable == current.)
+        """
         try:
             from transformers.cache_utils import DynamicCache
         except ImportError:
             return
-        if hasattr(DynamicCache, "seen_tokens"):
-            return
 
-        def _seen_tokens(self):  # noqa: ANN001 - matches transformers cache surface
-            try:
-                return self.get_seq_length()
-            except Exception:
-                return 0
+        if not hasattr(DynamicCache, "seen_tokens"):
+            def _seen_tokens(self):  # noqa: ANN001 - matches transformers cache surface
+                try:
+                    return self.get_seq_length()
+                except Exception:
+                    return 0
 
-        DynamicCache.seen_tokens = property(_seen_tokens)
+            DynamicCache.seen_tokens = property(_seen_tokens)
+
+        if not hasattr(DynamicCache, "get_max_length"):
+            def _get_max_length(self):  # noqa: ANN001
+                fn = getattr(self, "get_max_cache_shape", None)
+                if fn is not None:
+                    try:
+                        return fn()
+                    except Exception:
+                        return None
+                return None
+
+            DynamicCache.get_max_length = _get_max_length
+
+        if not hasattr(DynamicCache, "get_usable_length"):
+            def _get_usable_length(self, new_seq_length, layer_idx=0):  # noqa: ANN001
+                # DynamicCache has no max length -- usable == seq length so far.
+                try:
+                    return self.get_seq_length(layer_idx)
+                except Exception:
+                    return 0
+
+            DynamicCache.get_usable_length = _get_usable_length
 
     def _infer_pages(self, pages: list[Image], prompt: str) -> str:
         import torch

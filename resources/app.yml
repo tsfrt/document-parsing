@@ -1,0 +1,31 @@
+# Databricks App that hosts the Streamlit OCR playground. The source code
+# (`app.yaml` + `streamlit_app.py`) lives under the bundle's `app/` directory
+# and is synced to the workspace by `databricks bundle deploy`. The app is
+# granted CAN_QUERY on each of the three serving endpoints so the service
+# principal can invoke them via the WorkspaceClient.
+resources:
+  apps:
+    doc-parser-playground:
+      name: doc-parser-playground
+      description: |
+        Streamlit playground for the three OCR document-parsing endpoints
+        (Florence-2, Phi-3.5-vision, Granite-Vision-3.2). Upload a PDF or
+        image, pick one or more models, and compare Markdown / JSON output
+        side-by-side.
+      source_code_path: ${workspace.file_path}/app
+      resources:
+        - name: doc-parser-florence
+          description: Florence-2 large-ft OCR endpoint.
+          serving_endpoint:
+            name: doc-parser-florence
+            permission: CAN_QUERY
+        - name: doc-parser-phi3-vision
+          description: Phi-3.5-vision OCR endpoint.
+          serving_endpoint:
+            name: doc-parser-phi3-vision
+            permission: CAN_QUERY
+        - name: doc-parser-granite-vision
+          description: Granite-Vision-3.2 OCR endpoint.
+          serving_endpoint:
+            name: doc-parser-granite-vision
+            permission: CAN_QUERY

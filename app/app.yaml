@@ -11,4 +11,4 @@ env:
   - name: STREAMLIT_BROWSER_GATHER_USAGE_STATS
     value: "false"
   - name: MODEL_ENDPOINTS
-    value: '[{"key":"florence","label":"Florence-2 large-ft (Microsoft, 770M)","name":"doc-parser-florence"},{"key":"phi3","label":"Phi-3.5-vision (Microsoft, 4.2B)","name":"doc-parser-phi3-vision"},{"key":"granite","label":"Granite-Vision-3.2 (IBM, 2.5B)","name":"doc-parser-granite-vision"},{"key":"nougat","label":"Nougat-base (Meta, 350M)","name":"doc-parser-nougat"}]'
+    value: '[{"key":"florence","label":"Florence-2 large-ft (Microsoft, 770M)","name":"doc-parser-florence"},{"key":"phi3","label":"Phi-3.5-vision (Microsoft, 4.2B)","name":"doc-parser-phi3-vision"},{"key":"granite","label":"Granite-Vision-3.2 (IBM, 2.5B)","name":"doc-parser-granite-vision"}]'

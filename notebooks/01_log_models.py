@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Log all four OCR pyfunc models to Unity Catalog
+# MAGIC # Log all three OCR pyfunc models to Unity Catalog
 # MAGIC
 # MAGIC Snapshots each Hugging Face repo locally then logs the model with
 # MAGIC weights baked in as MLflow artifacts so the served container does not
@@ -15,7 +15,7 @@
 
 dbutils.widgets.text("catalog", "main")
 dbutils.widgets.text("schema", "doc_parsing")
-dbutils.widgets.text("models", "florence,phi3_vision,granite_vision,nougat")
+dbutils.widgets.text("models", "florence,phi3_vision,granite_vision")
 
 # COMMAND ----------
 

@@ -23,8 +23,7 @@ FROM read_files('/Volumes/main/doc_parsing/inbox/', format => 'binaryFile');
 SELECT main.doc_parsing.parse_doc_phi3(unbase64('JVBERi0xLj... <truncated> ...'));
 
 -- 4) Direct ai_query (no UDF) for full control over modelParameters.
---    Phi-3.5-vision and Granite-Vision honour the optional `prompt` field;
---    Nougat ignores it (encoder-decoder, not instruction-tuned).
+--    Phi-3.5-vision and Granite-Vision both honour the optional `prompt` field.
 SELECT path,
        ai_query(
          'doc-parser-phi3-vision',
@@ -48,10 +47,11 @@ FROM read_files(
   fileNamePattern => '*.{pdf,png,jpg,jpeg,PDF,PNG,JPG,JPEG}'
 );
 
--- 6) Specialist routing: send academic PDFs to Nougat, everything else to Florence.
+-- 6) Specialist routing: send tables / charts / forms to Granite-Vision,
+--    everything else to Florence as a fast default.
 SELECT path,
-       CASE WHEN lower(path) LIKE '%paper%' OR lower(path) LIKE '%arxiv%'
-            THEN main.doc_parsing.parse_doc_nougat(content)
+       CASE WHEN lower(path) LIKE '%table%' OR lower(path) LIKE '%form%' OR lower(path) LIKE '%chart%'
+            THEN main.doc_parsing.parse_doc_granite(content)
             ELSE main.doc_parsing.parse_doc_florence(content)
        END AS markdown
 FROM read_files('/Volumes/main/doc_parsing/inbox/', format => 'binaryFile');

@@ -20,7 +20,6 @@ CANDIDATE_ENDPOINTS = [
     "doc-parser-florence",
     "doc-parser-phi3-vision",
     "doc-parser-granite-vision",
-    "doc-parser-nougat",
 ]
 
 

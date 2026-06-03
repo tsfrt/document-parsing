@@ -39,15 +39,6 @@ resources:
               models: granite_vision
           environment_key: log_env
 
-        - task_key: log_nougat
-          notebook_task:
-            notebook_path: ../notebooks/01_log_models.py
-            base_parameters:
-              catalog: ${var.catalog}
-              schema: ${var.schema}
-              models: nougat
-          environment_key: log_env
-
       environments:
         - environment_key: log_env
           spec:
@@ -196,7 +187,7 @@ resources:
 
     eval-ocr-endpoints:
       name: "[${bundle.target}] eval-ocr-endpoints"
-      description: "Small mlflow.genai.evaluate() comparison across all four doc-parser-* endpoints. One named run per endpoint inside ${var.eval_experiment_path}."
+      description: "Small mlflow.genai.evaluate() comparison across the three doc-parser-* endpoints. One named run per endpoint inside ${var.eval_experiment_path}."
       tags:
         project: ai-parse-doc
         target: ${bundle.target}
@@ -204,7 +195,7 @@ resources:
         - name: experiment_path
           default: ${var.eval_experiment_path}
         - name: endpoints
-          default: "doc-parser-florence,doc-parser-phi3-vision,doc-parser-granite-vision,doc-parser-nougat"
+          default: "doc-parser-florence,doc-parser-phi3-vision,doc-parser-granite-vision"
         - name: judge_model
           default: ${var.eval_judge_model}
       tasks:

@@ -112,12 +112,23 @@ class FlorencePyfunc(OcrPyfunc):
                 return_tensors="pt",
             ).to(self.device, dtype=self.model.dtype if self.device == "cuda" else None)
             with torch.inference_mode():
+                # ``use_cache=False`` is mandatory on transformers >= 4.50:
+                # Florence-2's vendored ``modeling_florence2.py`` (loaded via
+                # trust_remote_code) implements ``prepare_inputs_for_generation``
+                # against the legacy tuple-of-tuples ``past_key_values`` API and
+                # crashes on the new ``DynamicCache`` with
+                # ``'NoneType' object has no attribute 'shape'``. Disabling the
+                # KV cache forces the language-model generate loop to skip that
+                # branch entirely. Negligible latency impact at our output
+                # lengths (Florence-2 caps decoding at ~1k tokens and is
+                # encoder-heavy on T4).
                 generated = self.model.generate(
                     input_ids=inputs["input_ids"],
                     pixel_values=inputs["pixel_values"],
                     max_new_tokens=self.MAX_NEW_TOKENS,
                     num_beams=3,
                     do_sample=False,
+                    use_cache=False,
                 )
             decoded = self.processor.batch_decode(
                 generated, skip_special_tokens=False

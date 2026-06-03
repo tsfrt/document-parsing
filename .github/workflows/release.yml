@@ -42,7 +42,7 @@ jobs:
       - name: Resolve model versions from "Production" alias
         run: |
           set -euo pipefail
-          for model in florence phi3_vision granite_vision nougat; do
+          for model in florence phi3_vision granite_vision; do
             full="${BUNDLE_VAR_catalog}.${BUNDLE_VAR_schema}.${model}"
             ver=$(databricks model-versions get-by-alias "$full" Production --output json | jq -r '.version')
             echo "BUNDLE_VAR_${model}_version=${ver}" >> "$GITHUB_ENV"

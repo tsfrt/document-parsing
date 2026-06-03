@@ -38,9 +38,6 @@ variables:
   granite_vision_version:
     description: Registered-model version of granite_vision served by the endpoint.
     default: "1"
-  nougat_version:
-    description: Registered-model version of nougat served by the endpoint.
-    default: "1"
   eval_experiment_path:
     description: Workspace path for the MLflow experiment used by eval-ocr-endpoints.
     default: /Shared/ai-parse-doc/eval

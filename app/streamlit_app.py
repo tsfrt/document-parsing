@@ -34,7 +34,6 @@ def load_endpoints() -> list[Endpoint]:
             Endpoint("florence", "Florence-2 large-ft (Microsoft, 770M)", "doc-parser-florence"),
             Endpoint("phi3",     "Phi-3.5-vision (Microsoft, 4.2B)",      "doc-parser-phi3-vision"),
             Endpoint("granite",  "Granite-Vision-3.2 (IBM, 2.5B)",        "doc-parser-granite-vision"),
-            Endpoint("nougat",   "Nougat-base (Meta, 350M)",              "doc-parser-nougat"),
         ]
     return [Endpoint(**e) for e in json.loads(raw)]
 

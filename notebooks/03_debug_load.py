@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Debug processor / tokenizer loading for the four OCR models
+# MAGIC # Debug processor / tokenizer loading for the three OCR models
 # MAGIC
 # MAGIC Runs on serverless CPU. For each HF repo we snapshot the weights once
 # MAGIC then try several class-resolution strategies (`AutoProcessor`,
@@ -46,7 +46,6 @@ REPOS = {
     "florence":       "microsoft/Florence-2-large-ft",
     "phi3_vision":    "microsoft/Phi-3.5-vision-instruct",
     "granite_vision": "ibm-granite/granite-vision-3.2-2b",
-    "nougat":         "facebook/nougat-base",
 }
 
 results: dict[str, dict] = {}

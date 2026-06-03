@@ -1,4 +1,4 @@
-# Four GPU-backed Model Serving endpoints, one per OCR model. All deploy with
+# Three GPU-backed Model Serving endpoints, one per OCR model. All deploy with
 # `workload_type: GPU_SMALL` (16 GB VRAM, T4-class) and scale to zero when
 # idle. `entity_version` defaults to "1" and is overridden by CI from the
 # "Production" alias on each registered model.
@@ -63,23 +63,3 @@ resources:
           value: ai-parse-doc
         - key: model
           value: granite-vision
-
-    doc-parser-nougat:
-      name: doc-parser-nougat
-      config:
-        served_entities:
-          - name: nougat
-            entity_name: ${var.catalog}.${var.schema}.nougat
-            entity_version: "${var.nougat_version}"
-            workload_size: ${var.workload_size}
-            workload_type: ${var.workload_type}
-            scale_to_zero_enabled: ${var.scale_to_zero_enabled}
-        traffic_config:
-          routes:
-            - served_model_name: nougat
-              traffic_percentage: 100
-      tags:
-        - key: project
-          value: ai-parse-doc
-        - key: model
-          value: nougat

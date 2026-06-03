@@ -1,8 +1,8 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # OCR / document-parsing evaluation across the four endpoints
+# MAGIC # OCR / document-parsing evaluation across the three endpoints
 # MAGIC
-# MAGIC Compares the four `doc-parser-*` serving endpoints on a small, curated set
+# MAGIC Compares the three `doc-parser-*` serving endpoints on a small, curated set
 # MAGIC of synthetic documents. The dataset and scorers are deliberately
 # MAGIC OCR-shaped (not generic GenAI):
 # MAGIC
@@ -42,7 +42,7 @@
 dbutils.widgets.text("experiment_path", "/Shared/ai-parse-doc/eval")
 dbutils.widgets.text(
     "endpoints",
-    "doc-parser-florence,doc-parser-phi3-vision,doc-parser-granite-vision,doc-parser-nougat",
+    "doc-parser-florence,doc-parser-phi3-vision,doc-parser-granite-vision",
 )
 dbutils.widgets.text("judge_model", "databricks:/databricks-meta-llama-3-3-70b-instruct")
 
@@ -518,22 +518,24 @@ def non_empty(outputs: dict[str, Any]) -> Feedback:
 # OCR-specific LLM judge. Uses a transcription rubric rather than the generic
 # `Correctness` judge -- the prompt explicitly asks about character accuracy,
 # numeric fidelity, reading order, and structure preservation.
+#
+# `make_judge` only accepts the top-level template vars {inputs, outputs,
+# expectations, trace, conversation}; it does NOT support dotted access
+# (e.g. `{{ inputs.doc_type }}` -> error). We pass the whole dicts and let
+# the judge introspect them.
 ocr_quality = make_judge(
     name="ocr_quality",
     instructions=(
         "You are evaluating an OCR / document-parsing system.\n\n"
-        "Document type: {{ inputs.doc_type }}\n"
-        "Description:   {{ inputs.description }}\n\n"
-        "Reference text (ground truth from the source document):\n"
-        "----\n"
-        "{{ expectations.expected_response }}\n"
-        "----\n\n"
-        "System's transcription:\n"
-        "----\n"
-        "{{ outputs.response }}\n"
-        "----\n\n"
-        "Rate the transcription on these dimensions, weighted equally:\n"
-        "  1. Character accuracy   (letters, digits, punctuation)\n"
+        "INPUTS (includes `doc_type` and `description` of the source document):\n"
+        "{{ inputs }}\n\n"
+        "EXPECTATIONS (the `expected_response` field is the ground-truth text):\n"
+        "{{ expectations }}\n\n"
+        "OUTPUTS (the `response` field is the system's transcription):\n"
+        "{{ outputs }}\n\n"
+        "Compare `outputs.response` against `expectations.expected_response`.\n"
+        "Rate the transcription on these four dimensions, weighted equally:\n"
+        "  1. Character accuracy   (letters, digits, punctuation correct)\n"
         "  2. Numerical fidelity   (currency, dates, IDs preserved exactly)\n"
         "  3. Reading order        (lines/paragraphs in source order)\n"
         "  4. Structure            (tables -> markdown tables, lists -> lists,\n"
@@ -618,7 +620,9 @@ for endpoint, metrics in per_endpoint_metrics.items():
     row: dict[str, Any] = {"endpoint": endpoint}
     for key in _PRIMARY:
         v = metrics.get(key)
-        row[key] = round(v, 4) if isinstance(v, (int, float)) else v
+        # Cast numpy scalars (float64 etc.) to native python so spark schema
+        # inference doesn't choke; keep None as None.
+        row[key] = float(v) if isinstance(v, (int, float)) else v
     rows.append(row)
 
 
@@ -638,7 +642,21 @@ for r in rows:
     cells = [_fmt(r.get(h)) for h in header]
     print("| " + " | ".join(cells) + " |")
 
-display(spark.createDataFrame(rows))  # type: ignore[name-defined]  # noqa: F821
+# Spark + display() are only available inside a Databricks notebook context;
+# guard so the same file also runs as a plain Python script.
+try:
+    import pandas as pd
+
+    pdf = pd.DataFrame(rows)
+    try:
+        display(spark.createDataFrame(pdf))  # type: ignore[name-defined]  # noqa: F821
+    except (NameError, Exception):  # noqa: BLE001 - fall back to pandas display
+        try:
+            display(pdf)  # type: ignore[name-defined]  # noqa: F821
+        except NameError:
+            print(pdf.to_string(index=False))
+except Exception as exc:  # noqa: BLE001
+    print(f"(scoreboard render failed: {exc!r}; metrics still logged to MLflow)")
 
 # Surface a failure if any endpoint returned only empty / errored outputs --
 # makes the eval job a useful CI signal, not just a notebook.
